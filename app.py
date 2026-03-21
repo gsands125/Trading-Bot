@@ -20,8 +20,8 @@ def webhook():
     hour = datetime.utcnow().hour
 
     # NY session = 13–16 UTC
-    if False:
-        return jsonify({"status": "outside session"}), 200
+    if hour < 13 or hour >= 16:
+    return jsonify({"status": "outside session"}), 200
 
     # ---- TRADE QUALITY FILTER ----
     if confidence < 7:

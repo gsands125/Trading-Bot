@@ -14,13 +14,18 @@ def webhook():
     symbol = data.get("symbol")
     action = data.get("action")
     price = float(data.get("price"))
+    confidence = int(data.get("confidence", 5))
 
     # ---- SESSION FILTER ----
     hour = datetime.utcnow().hour
 
-    # NY session = 13–16 UTC (9:30–12 EST approx)
+    # NY session = 13–16 UTC
     if hour < 13 or hour >= 16:
         return jsonify({"status": "outside session"}), 200
+
+    # ---- TRADE QUALITY FILTER ----
+    if confidence < 7:
+        return jsonify({"status": "low quality trade"}), 200
 
     # ---- RISK SETTINGS ----
     ACCOUNT_SIZE = 10000
@@ -50,13 +55,3 @@ def webhook():
         "status": "executed",
         "contracts": contracts
     }), 200
-
-
-@app.route('/')
-def home():
-    return "Bot is running"
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)

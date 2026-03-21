@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
 from datetime import datetime
-import os
 
 app = Flask(__name__)
 
@@ -19,9 +18,8 @@ def webhook():
     # ---- SESSION FILTER ----
     hour = datetime.utcnow().hour
 
-    # NY session = 13–16 UTC
     if hour < 13 or hour >= 16:
-    return jsonify({"status": "outside session"}), 200
+        return jsonify({"status": "outside session"}), 200
 
     # ---- TRADE QUALITY FILTER ----
     if confidence < 7:
@@ -46,10 +44,11 @@ def webhook():
         contracts = 1
     else:
         contracts = int(risk_amount / (stop_distance * MNQ_TICK_VALUE))
-        contracts = max(1, contracts)
 
-    print(f"📊 {action} {contracts} {symbol} @ {price}")
-    print(f"🛑 Stop: {stop}")
+    contracts = max(1, contracts)
+
+    print(f"{action} {contracts} {symbol} @ {price}")
+    print(f"Stop: {stop}")
 
     return jsonify({
         "status": "executed",

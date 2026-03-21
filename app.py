@@ -1,3 +1,9 @@
+from flask import Flask, request, jsonify
+from datetime import datetime
+import os
+
+app = Flask(__name__)
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json(force=True)
@@ -12,7 +18,7 @@ def webhook():
     # ---- SESSION FILTER ----
     hour = datetime.utcnow().hour
 
-    # NY session = 13–16 UTC
+    # NY session = 13–16 UTC (9:30–12 EST approx)
     if hour < 13 or hour >= 16:
         return jsonify({"status": "outside session"}), 200
 
@@ -44,3 +50,13 @@ def webhook():
         "status": "executed",
         "contracts": contracts
     }), 200
+
+
+@app.route('/')
+def home():
+    return "Bot is running"
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

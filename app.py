@@ -9,6 +9,13 @@ def webhook():
 
     print("🔥 ALERT RECEIVED:", data)
 
+    # 🔐 SECRET PROTECTION (FIRST THING)
+    SECRET_KEY = "PassiveJabba125"
+    incoming_secret = data.get("secret")
+
+    if incoming_secret != SECRET_KEY:
+        return jsonify({"status": "unauthorized"}), 403
+
     # ---- DATA ----
     symbol = data.get("symbol")
     action = data.get("action")

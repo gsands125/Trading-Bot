@@ -1,7 +1,13 @@
 from flask import Flask, request, jsonify
 from datetime import datetime
+import os
 
 app = Flask(__name__)
+
+SECRET_KEY = os.environ.get("WEBHOOK_SECRET")
+MAX_LOSSES_PER_DAY = 2
+daily_loss_count = 0
+
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -9,12 +15,23 @@ def webhook():
 
     print("🔥 ALERT RECEIVED:", data)
 
-    # 🔐 SECRET PROTECTION (FIRST THING)
-    SECRET_KEY = "PassiveJabba125"
-    incoming_secret = data.get("secret")
-
-    if incoming_secret != SECRET_KEY:
+    # ---- SECRET KEY CHECK ----
+    if data.get("secret") != SECRET_KEY:
         return jsonify({"status": "unauthorized"}), 403
+
+    global daily_loss_count
+
+    # ---- DAILY LOSS LIMIT ----
+    if daily_loss_count >= MAX_LOSSES_PER_DAY:
+        return jsonify({"status": "daily loss limit reached"}), 200
+
+    # ---- RECORD LOSS ----
+    if data.get("result") == "LOSS":
+        daily_loss_count += 1
+        return jsonify({
+            "status": "loss recorded",
+            "daily_loss_count": daily_loss_count
+        }), 200
 
     # ---- DATA ----
     symbol = data.get("symbol")
@@ -24,7 +41,6 @@ def webhook():
 
     # ---- SESSION FILTER ----
     hour = datetime.utcnow().hour
-
     if hour < 13 or hour >= 16:
         return jsonify({"status": "outside session"}), 200
 
@@ -34,7 +50,7 @@ def webhook():
 
     # ---- RISK SETTINGS ----
     ACCOUNT_SIZE = 10000
-    RISK_PER_TRADE = 0.01
+    RISK_PER_TRADE = 0.015
     MNQ_TICK_VALUE = 2
 
     # ---- STOP LOGIC ----
@@ -51,8 +67,7 @@ def webhook():
         contracts = 1
     else:
         contracts = int(risk_amount / (stop_distance * MNQ_TICK_VALUE))
-
-    contracts = max(1, contracts)
+        contracts = max(1, contracts)
 
     print(f"{action} {contracts} {symbol} @ {price}")
     print(f"Stop: {stop}")
@@ -61,3 +76,13 @@ def webhook():
         "status": "executed",
         "contracts": contracts
     }), 200
+
+
+@app.route('/')
+def home():
+    return "Bot is running"
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

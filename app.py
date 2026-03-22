@@ -7,15 +7,23 @@ app = Flask(__name__)
 SECRET_KEY = os.environ.get("WEBHOOK_SECRET")
 MAX_LOSSES_PER_DAY = 2
 daily_loss_count = 0
+last_reset_date = datetime.utcnow().date()
 
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    global daily_loss_count
+    global daily_loss_count, last_reset_date
 
     data = request.get_json(force=True)
 
     print("🔥 ALERT RECEIVED:", data)
+
+    # ---- AUTO DAILY RESET ----
+    current_date = datetime.utcnow().date()
+    if current_date != last_reset_date:
+        daily_loss_count = 0
+        last_reset_date = current_date
+        print("🔄 Daily loss count reset")
 
     # ---- SECRET CHECK ----
     if data.get("secret") != SECRET_KEY:
@@ -83,11 +91,6 @@ def webhook():
 @app.route('/')
 def home():
     return "Bot is running"
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":

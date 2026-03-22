@@ -11,15 +11,15 @@ daily_loss_count = 0
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
+    global daily_loss_count
+
     data = request.get_json(force=True)
 
     print("🔥 ALERT RECEIVED:", data)
 
-    # ---- SECRET KEY CHECK ----
+    # ---- SECRET CHECK ----
     if data.get("secret") != SECRET_KEY:
-        return jsonify({"status": "unauthorized"}), 403
-
-    global daily_loss_count
+        return jsonify({"status": "unauthorized"}), 401
 
     # ---- DAILY LOSS LIMIT ----
     if daily_loss_count >= MAX_LOSSES_PER_DAY:
@@ -74,13 +74,20 @@ def webhook():
 
     return jsonify({
         "status": "executed",
-        "contracts": contracts
+        "contracts": contracts,
+        "stop": stop,
+        "daily_loss_count": daily_loss_count
     }), 200
 
 
 @app.route('/')
 def home():
     return "Bot is running"
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":

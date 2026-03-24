@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
-from datetime import datetime
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
 
@@ -9,17 +10,21 @@ app = Flask(__name__)
 
 SECRET = "PassiveJabba126"
 
-# 🔥 TURN THIS ON FOR TESTING
-ALLOW_ALL_HOURS = True
+# TEST MODE OFF
+ALLOW_ALL_HOURS = False
+
+# Exact best-performing window
+NY_TZ = ZoneInfo("America/New_York")
+SESSION_START = time(9, 30)   # 9:30 AM ET
+SESSION_END = time(12, 0)     # 12:00 PM ET
 
 # =============================
 # SESSION LOGIC
 # =============================
 
 def is_in_session():
-    now = datetime.utcnow()
-    hour = now.hour
-    return 13 <= hour <= 21  # NY session (UTC)
+    now_ny = datetime.now(NY_TZ).time()
+    return SESSION_START <= now_ny <= SESSION_END
 
 # =============================
 # WEBHOOK ENDPOINT
@@ -27,29 +32,20 @@ def is_in_session():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json()
+    data = request.get_json(silent=True)
 
     if not data:
         return jsonify({"status": "error", "reason": "No data"}), 400
 
-    # =============================
-    # AUTH CHECK
-    # =============================
     if data.get("secret") != SECRET:
         return jsonify({"status": "rejected", "reason": "Invalid secret"}), 403
 
-    # =============================
-    # SESSION FILTER
-    # =============================
     if not ALLOW_ALL_HOURS and not is_in_session():
         return jsonify({
             "status": "rejected",
             "reason": "Outside allowed session"
         }), 400
 
-    # =============================
-    # PARSE SIGNAL
-    # =============================
     symbol = data.get("symbol")
     action = data.get("action")
     price = data.get("price")
@@ -60,12 +56,13 @@ def webhook():
             "reason": "Missing fields"
         }), 400
 
-    # =============================
-    # SIMULATED TRADE EXECUTION
-    # =============================
-    print(f"📥 SIGNAL RECEIVED: {action.upper()} {symbol} @ {price}")
+    if action not in ["buy", "sell"]:
+        return jsonify({
+            "status": "error",
+            "reason": "Invalid action"
+        }), 400
 
-    # Here is where you will later connect to broker
+    print(f"SIGNAL RECEIVED: {action.upper()} {symbol} @ {price}")
 
     return jsonify({
         "status": "accepted",
@@ -80,6 +77,21 @@ def webhook():
 
 @app.route("/health", methods=["GET"])
 def health():
+    return jsonify({
+        "service": "MNQ bot",
+        "status": "ok",
+        "test_mode": ALLOW_ALL_HOURS,
+        "session_timezone": "America/New_York",
+        "session_start": "09:30",
+        "session_end": "12:00"
+    })
+
+# =============================
+# HOME
+# =============================
+
+@app.route("/", methods=["GET"])
+def home():
     return jsonify({
         "service": "MNQ bot",
         "status": "ok"

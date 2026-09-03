@@ -1,202 +1,67 @@
-from flask import Flask, request, jsonify
-from datetime import datetime, time
-from zoneinfo import ZoneInfo
+from pathlib import Path
 
-app = Flask(__name__)
+from master_router import (
+    MasterRouter,
+    LUCID_FLEX_50K, TRADEIFY_SELECT_FLEX_50K,
+    JsonStateStore, JsonlAuditLedger, JsonlReconciliationLedger,
+    LifecycleStateMachine, PaperRouterService, create_flask_app,
+    JsonLifecycleStore, JsonlEventJournal, JsonlAlertSink,
+    load_accounts_from_json, DeploymentGuardrails,
+)
+from master_router.config import RouterConfig
 
-# =============================
-# CONFIG
-# =============================
+cfg = RouterConfig.from_env()
 
-SECRET = "PassiveJabba126"
-ALLOW_ALL_HOURS = False
+guardrails = DeploymentGuardrails(
+    paper_mode=cfg.paper_mode,
+    allowed_strategies=cfg.allowed_strategies,
+    status_secret=cfg.status_secret,
+)
 
-NY_TZ = ZoneInfo("America/New_York")
-SESSION_START = time(9, 30)   # 9:30 AM ET
-SESSION_END = time(12, 0)     # 12:00 PM ET
+startup_problems = guardrails.validate_startup(
+    cfg.state_path, cfg.accounts_config_path
+)
+if startup_problems:
+    # App still starts so Railway health diagnostics are visible.
+    # /webhook remains blocked until configuration is corrected.
+    pass
 
-# =============================
-# SIMPLE POSITION STATE
-# =============================
+router = MasterRouter(
+    audit_ledger=JsonlAuditLedger(cfg.audit_path)
+)
+state_store = JsonStateStore(cfg.state_path)
+state_store.load_into(router)
 
-position_open = False
-open_position = {
-    "symbol": None,
-    "side": None,        # "long" or "short"
-    "entry_price": None,
-    "opened_at": None
-}
+lifecycle = LifecycleStateMachine()
+lifecycle_store = JsonLifecycleStore(cfg.lifecycle_state_path)
+lifecycle_store.load_into(lifecycle)
 
-last_closed_position = {
-    "symbol": None,
-    "side": None,
-    "entry_price": None,
-    "exit_price": None,
-    "opened_at": None,
-    "closed_at": None
-}
+if not router.accounts and not startup_problems:
+    for account in load_accounts_from_json(cfg.accounts_config_path):
+        router.register_account(account)
+    state_store.save(router)
 
-# =============================
-# SESSION LOGIC
-# =============================
+service = PaperRouterService(
+    router=router,
+    expected_secret=cfg.webhook_secret,
+    state_store=state_store,
+    reconciliation_ledger=JsonlReconciliationLedger(cfg.reconciliation_path),
+    lifecycle_machine=lifecycle,
+    lifecycle_store=lifecycle_store,
+    firm_configs={
+        LUCID_FLEX_50K.name: LUCID_FLEX_50K,
+        TRADEIFY_SELECT_FLEX_50K.name: TRADEIFY_SELECT_FLEX_50K,
+    },
+    event_journal=JsonlEventJournal(cfg.event_journal_path),
+    alert_sink=JsonlAlertSink(cfg.alert_path),
+    deployment_guardrails=guardrails,
+)
 
-def is_in_session():
-    now_ny = datetime.now(NY_TZ).time()
-    return SESSION_START <= now_ny <= SESSION_END
-
-# =============================
-# HOME
-# =============================
-
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({
-        "service": "MNQ bot",
-        "status": "ok"
-    })
-
-# =============================
-# HEALTH CHECK
-# =============================
-
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({
-        "service": "MNQ bot",
-        "status": "ok",
-        "test_mode": ALLOW_ALL_HOURS,
-        "session_timezone": "America/New_York",
-        "session_start": "09:30",
-        "session_end": "12:00",
-        "position_open": position_open,
-        "open_position": open_position,
-        "last_closed_position": last_closed_position
-    })
-
-# =============================
-# WEBHOOK ENDPOINT
-# =============================
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    global position_open, open_position, last_closed_position
-
-    data = request.get_json(silent=True)
-
-    if not data:
-        return jsonify({"status": "error", "reason": "No data"}), 400
-
-    if data.get("secret") != SECRET:
-        return jsonify({"status": "rejected", "reason": "Invalid secret"}), 403
-
-    symbol = data.get("symbol")
-    action = data.get("action")
-    price = data.get("price")
-
-    if not symbol or not action:
-        return jsonify({
-            "status": "error",
-            "reason": "Missing fields"
-        }), 400
-
-    if action not in ["buy", "sell", "close_long", "close_short"]:
-        return jsonify({
-            "status": "error",
-            "reason": "Invalid action"
-        }), 400
-
-    # -----------------------------
-    # ENTRY SIGNALS
-    # -----------------------------
-    if action in ["buy", "sell"]:
-        if not ALLOW_ALL_HOURS and not is_in_session():
-            return jsonify({
-                "status": "rejected",
-                "reason": "Outside allowed session"
-            }), 400
-
-        if position_open:
-            return jsonify({
-                "status": "rejected",
-                "reason": "Position already open",
-                "open_position": open_position
-            }), 400
-
-        side = "long" if action == "buy" else "short"
-
-        position_open = True
-        open_position = {
-            "symbol": symbol,
-            "side": side,
-            "entry_price": price,
-            "opened_at": datetime.now(NY_TZ).isoformat()
-        }
-
-        print(f"ENTRY ACCEPTED: {side.upper()} {symbol} @ {price}")
-
-        return jsonify({
-            "status": "accepted",
-            "type": "entry",
-            "symbol": symbol,
-            "side": side,
-            "price": price,
-            "position_open": position_open,
-            "open_position": open_position
-        }), 200
-
-    # -----------------------------
-    # EXIT SIGNALS
-    # -----------------------------
-    if action in ["close_long", "close_short"]:
-        exit_side = "long" if action == "close_long" else "short"
-
-        if not position_open:
-            return jsonify({
-                "status": "ignored",
-                "reason": "No open position to close"
-            }), 200
-
-        if open_position["side"] != exit_side:
-            return jsonify({
-                "status": "ignored",
-                "reason": "Exit side does not match open position",
-                "open_position": open_position
-            }), 200
-
-        last_closed_position = {
-            "symbol": open_position["symbol"],
-            "side": open_position["side"],
-            "entry_price": open_position["entry_price"],
-            "exit_price": price,
-            "opened_at": open_position["opened_at"],
-            "closed_at": datetime.now(NY_TZ).isoformat()
-        }
-
-        print(f"EXIT ACCEPTED: {exit_side.upper()} {symbol} @ {price}")
-
-        position_open = False
-        open_position = {
-            "symbol": None,
-            "side": None,
-            "entry_price": None,
-            "opened_at": None
-        }
-
-        return jsonify({
-            "status": "accepted",
-            "type": "exit",
-            "symbol": symbol,
-            "side": exit_side,
-            "price": price,
-            "position_open": position_open,
-            "last_closed_position": last_closed_position
-        }), 200
-
-    return jsonify({"status": "error", "reason": "Unhandled action"}), 400
-
-# =============================
-# RUN SERVER
-# =============================
+app = create_flask_app(
+    service,
+    status_secret=cfg.status_secret,
+    startup_problems=startup_problems
+)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=cfg.port)

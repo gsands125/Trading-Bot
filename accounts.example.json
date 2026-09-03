@@ -1,0 +1,19 @@
+{
+  "accounts": [
+    {
+      "account_id": "LUCID-EVAL-1",
+      "stage": "evaluation",
+      "firm": "LucidFlex 50K"
+    },
+    {
+      "account_id": "TRADEIFY-EVAL-1",
+      "stage": "evaluation",
+      "firm": "Tradeify Select Flex 50K"
+    },
+    {
+      "account_id": "PERSONAL-1",
+      "stage": "personal",
+      "starting_equity": 5000
+    }
+  ]
+}

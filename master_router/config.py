@@ -23,6 +23,9 @@ class RouterConfig:
     allowed_strategies: set[str]
     paper_mode: bool
     status_secret: str | None
+    s1_webhook_token: str | None
+    s1_capture_path: str
+    s1_rpc_proxy: float
     port: int
 
     @classmethod
@@ -39,6 +42,7 @@ class RouterConfig:
         }
 
         status_secret = os.environ.get("STATUS_SECRET", "").strip() or None
+        s1_token = os.environ.get("S1_WEBHOOK_TOKEN", "").strip() or None
 
         return cls(
             webhook_secret=secret,
@@ -67,5 +71,8 @@ class RouterConfig:
             allowed_strategies=allowed,
             paper_mode=_as_bool("PAPER_MODE", True),
             status_secret=status_secret,
+            s1_webhook_token=s1_token,
+            s1_capture_path=os.environ.get("S1_CAPTURE_PATH", "/data/master_router_s1_capture.jsonl"),
+            s1_rpc_proxy=float(os.environ.get("S1_RPC_PROXY", "168.0")),
             port=int(os.environ.get("PORT", "8080")),
         )

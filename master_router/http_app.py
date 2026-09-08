@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-def create_flask_app(service, status_secret=None, startup_problems=None):
+def create_flask_app(service, status_secret=None, startup_problems=None, s1_token=None, s1_capture_journal=None, s1_rpc_proxy=168.0):
     from flask import Flask, jsonify, request
     from .webhook import WebhookAuthError, WebhookValidationError
     from .events import EventValidationError
+    from .s1_adapter import parse_s1_text, S1AdapterValidationError
 
     app = Flask(__name__)
     startup_problems = list(startup_problems or [])
@@ -50,6 +51,35 @@ def create_flask_app(service, status_secret=None, startup_problems=None):
             "open_positions": service.router.position_ledger.to_dict(),
             "processed_signal_count": len(service.router.processed_signal_ids),
         })
+
+
+    @app.post("/webhook/s1/<token>")
+    def s1_webhook(token):
+        # Protected ICT Uni emits plain-text alert() payloads and cannot embed
+        # the Router JSON secret. Authenticate using a dedicated URL token.
+        if not s1_token or token != s1_token:
+            return jsonify({"ok": False, "error": "unauthorized"}), 401
+        if s1_capture_journal is None:
+            return jsonify({"ok": False, "error": "S1 capture journal not configured"}), 503
+        try:
+            raw_text = request.get_data(as_text=True)
+            parsed = parse_s1_text(raw_text)
+            row = s1_capture_journal.append(parsed, rpc_proxy=s1_rpc_proxy)
+            preview = row["normalized_preview"]
+            # Capture-only by design. We do NOT mutate Router state until an
+            # execution-price source is defined for S1 entry and exit.
+            return jsonify({
+                "ok": True,
+                "mode": "S1_CAPTURE_ONLY",
+                "event_type": parsed.event_type,
+                "source_id": parsed.source_id,
+                "strategy": "S1",
+                "symbol": preview["symbol"],
+                "route_ready": preview["route_ready"],
+                "route_block_reason": preview["route_block_reason"],
+            }), 200
+        except S1AdapterValidationError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
 
     @app.post("/webhook")
     def webhook():

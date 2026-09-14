@@ -9,6 +9,7 @@ from master_router import (
     load_accounts_from_json, DeploymentGuardrails,
 )
 from master_router.config import RouterConfig
+from master_router.s1_adapter import S1CaptureJournal
 
 cfg = RouterConfig.from_env()
 
@@ -57,10 +58,17 @@ service = PaperRouterService(
     deployment_guardrails=guardrails,
 )
 
+s1_capture_journal = S1CaptureJournal(
+    Path(cfg.s1_capture_path)
+)
+
 app = create_flask_app(
     service,
     status_secret=cfg.status_secret,
-    startup_problems=startup_problems
+    startup_problems=startup_problems,
+    s1_token=cfg.s1_webhook_token,
+    s1_capture_journal=s1_capture_journal,
+    s1_rpc_proxy=cfg.s1_rpc_proxy,
 )
 
 if __name__ == "__main__":

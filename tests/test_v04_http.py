@@ -38,6 +38,10 @@ def test_http_health_and_webhook():
     assert body["ok"] is True
     assert body["accounts"]["PERSONAL"]["reconciliation"]["ok"] is True
 
-    # Exact retry is rejected by Router-level deduplication.
+    # Exact retry is an idempotent replay, not a rejection: TradingView retries
+    # webhooks on timeout, so a duplicate signal returns 200 with duplicate: true.
     w2=c.post("/webhook",json=p)
-    assert w2.status_code==409
+    assert w2.status_code==200
+    body2=w2.get_json()
+    assert body2["ok"] is True
+    assert body2["duplicate"] is True
